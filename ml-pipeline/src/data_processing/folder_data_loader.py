@@ -1,78 +1,127 @@
 """
-Simple Google Drive Data Loader for STR Project
+Scottsdale STR Data Loader
 
-This loader works with your specific Google Drive folder by trying different approaches
-to load the CSV files you have uploaded.
+Loads all 8 datasets from your Google Drive folder for comprehensive STR nuisance analysis.
 """
 
 import pandas as pd
 import requests
 from io import StringIO
 import logging
-from typing import Dict, Optional, List
-import time
+from typing import Dict, Optional
+import warnings
+warnings.filterwarnings('ignore')
 
-class STRDataLoader:
-    """Simple data loader for STR datasets from Google Drive folder"""
+class ScottsdaleSTRDataLoader:
+    """Data loader for Scottsdale STR datasets from Google Drive"""
     
     def __init__(self, folder_id="1FEInC_DsWaQo8XIvydEGL1e0si7wqvFg"):
         """
         Initialize with your Google Drive folder ID
-        
-        Args:
-            folder_id: Your Google Drive folder ID
         """
         self.folder_id = folder_id
         self.logger = logging.getLogger(__name__)
         
-        # We'll populate this with file IDs you provide
+        # Your specific file mappings - UPDATE THESE WITH INDIVIDUAL FILE IDs
+        self.file_configs = {
+            # STR Properties
+            'unlicensed_strs': {
+                'filename': 'Unlicensed_Short-term_Rentals_Public.csv',
+                'file_id': None,  # You'll provide individual sharing link
+                'description': 'Unlicensed STR properties',
+                'size': '70 KB'
+            },
+            'pending_licences': {
+                'filename': 'Pending_Short-term_Rental_Licences_Public.csv', 
+                'file_id': None,
+                'description': 'Pending STR licence applications',
+                'size': '18 KB'
+            },
+            
+            # Main Complaints Data
+            'ez_complaints': {
+                'filename': 'ScottsdaleEZ_Complaints_Public.csv',
+                'file_id': None,
+                'description': 'Main complaints system data', 
+                'size': '26.6 MB'
+            },
+            'code_violations': {
+                'filename': 'Planning_and_Development_Code_Violations_Public.csv',
+                'file_id': None,
+                'description': 'Code violations and enforcement',
+                'size': '3 MB'
+            },
+            
+            # Police Data
+            'police_incidents': {
+                'filename': 'Police_Incident_Reports_Public.csv',
+                'file_id': None,
+                'description': 'Police incident reports',
+                'size': '6.3 MB'
+            },
+            'police_citations': {
+                'filename': 'Police_Citations_Public.csv', 
+                'file_id': None,
+                'description': 'Police citations issued',
+                'size': '5.5 MB'
+            },
+            'police_arrests': {
+                'filename': 'Police_Arrests_Public.csv',
+                'file_id': None,
+                'description': 'Police arrest records',
+                'size': '5.4 MB'
+            },
+            
+            # Geographic Data
+            'parcels': {
+                'filename': 'Parcels_Public.csv',
+                'file_id': None,
+                'description': 'Property parcel information',
+                'size': '6.7 MB'
+            }
+        }
+        
+        # Loaded datasets storage
         self.datasets = {}
     
-    def load_from_file_id(self, file_id: str, dataset_name: str) -> Optional[pd.DataFrame]:
-        """
-        Load a specific file by its Google Drive file ID
+    def print_file_info(self):
+        """Display information about all available datasets"""
+        print("📁 SCOTTSDALE STR DATASETS")
+        print("=" * 50)
+        print(f"🔗 Google Drive Folder: {self.folder_id}")
+        print()
         
-        Args:
-            file_id: Google Drive file ID  
-            dataset_name: Name for logging
-            
-        Returns:
-            DataFrame or None
-        """
-        try:
-            # Direct download URL
-            url = f"https://drive.google.com/uc?id={file_id}&export=download"
-            
-            self.logger.info(f"📥 Loading {dataset_name}...")
-            
-            response = requests.get(url, timeout=60)
-            response.raise_for_status()
-            
-            # Handle large files that trigger virus scan
-            if 'virus scan warning' in response.text.lower() or len(response.text) < 1000:
-                # Try alternative download method
-                url = f"https://drive.google.com/uc?id={file_id}&export=download&confirm=t"
-                response = requests.get(url, timeout=60)
-            
-            # Load CSV
-            df = pd.read_csv(StringIO(response.text))
-            
-            self.logger.info(f"✅ {dataset_name}: {df.shape[0]:,} rows × {df.shape[1]} columns")
-            
-            return df
-            
-        except Exception as e:
-            self.logger.error(f"❌ Failed to load {dataset_name}: {str(e)}")
-            return None
+        # Group by category
+        categories = {
+            'STR Properties': ['unlicensed_strs', 'pending_licences'],
+            'Complaints & Violations': ['ez_complaints', 'code_violations'], 
+            'Police Data': ['police_incidents', 'police_citations', 'police_arrests'],
+            'Geographic Data': ['parcels']
+        }
+        
+        for category, datasets in categories.items():
+            print(f"📊 {category}:")
+            for dataset_key in datasets:
+                config = self.file_configs[dataset_key]
+                status = "🔗 Ready" if config['file_id'] else "⏳ Need link"
+                print(f"   {status} {config['filename']} ({config['size']})")
+                print(f"      └── {config['description']}")
+            print()
     
-    def setup_with_file_urls(self, file_urls: Dict[str, str]):
+    def setup_file_links(self, file_links: Dict[str, str]):
         """
-        Set up the loader with Google Drive file URLs
+        Set up individual Google Drive file sharing links
         
         Args:
-            file_urls: Dictionary mapping dataset names to Google Drive sharing URLs
+            file_links: Dictionary mapping dataset keys to Google Drive sharing URLs
         """
-        for name, url in file_urls.items():
+        print("🔗 Setting up Google Drive file links...")
+        
+        for dataset_key, url in file_links.items():
+            if dataset_key not in self.file_configs:
+                print(f"⚠️  Unknown dataset key: {dataset_key}")
+                continue
+            
             # Extract file ID from sharing URL
             if '/file/d/' in url:
                 file_id = url.split('/file/d/')[1].split('/')[0]
@@ -81,138 +130,186 @@ class STRDataLoader:
             else:
                 file_id = url  # Assume it's already just the ID
             
-            # Load the dataset
-            df = self.load_from_file_id(file_id, name)
-            if df is not None:
-                self.datasets[name] = df
+            self.file_configs[dataset_key]['file_id'] = file_id
+            filename = self.file_configs[dataset_key]['filename']
+            print(f"   ✅ {dataset_key}: {filename}")
     
-    def get_folder_contents_instruction(self):
+    def load_dataset(self, dataset_key: str) -> Optional[pd.DataFrame]:
         """
-        Print instructions for getting individual file links from the folder
+        Load a specific dataset from Google Drive
+        
+        Args:
+            dataset_key: Key from file_configs
+            
+        Returns:
+            DataFrame or None if loading fails
         """
-        print("📁 TO LOAD YOUR DATA FROM GOOGLE DRIVE FOLDER:")
-        print("=" * 60)
-        print(f"1. Go to your folder: https://drive.google.com/drive/folders/{self.folder_id}")
-        print("2. For EACH CSV file in the folder:")
-        print("   • Right-click on the file")
-        print("   • Select 'Get link'") 
-        print("   • Make sure it's set to 'Anyone with the link can view'")
-        print("   • Copy the link")
-        print("3. Then use this code:")
-        print()
-        print("file_links = {")
-        print("    'complaints': 'https://drive.google.com/file/d/YOUR_COMPLAINTS_FILE_ID/view',")
-        print("    'properties': 'https://drive.google.com/file/d/YOUR_PROPERTIES_FILE_ID/view',")
-        print("    'violations': 'https://drive.google.com/file/d/YOUR_VIOLATIONS_FILE_ID/view',")
-        print("}")
-        print("loader.setup_with_file_urls(file_links)")
-        print()
+        if dataset_key not in self.file_configs:
+            self.logger.error(f"Unknown dataset: {dataset_key}")
+            return None
+        
+        config = self.file_configs[dataset_key]
+        file_id = config['file_id']
+        
+        if not file_id:
+            self.logger.warning(f"No file ID for {dataset_key}")
+            return None
+        
+        try:
+            # Download from Google Drive
+            url = f"https://drive.google.com/uc?id={file_id}&export=download"
+            
+            self.logger.info(f"📥 Loading {config['filename']}...")
+            
+            response = requests.get(url, timeout=120)  # Longer timeout for large files
+            response.raise_for_status()
+            
+            # Handle large files with virus scan warning
+            if len(response.text) < 1000 and 'virus scan' in response.text.lower():
+                # Try alternative download method
+                url = f"https://drive.google.com/uc?id={file_id}&export=download&confirm=t"
+                response = requests.get(url, timeout=120)
+            
+            # Load CSV
+            df = pd.read_csv(StringIO(response.text), low_memory=False)
+            
+            self.logger.info(f"✅ {config['filename']}: {df.shape[0]:,} rows × {df.shape[1]} columns")
+            
+            return df
+            
+        except Exception as e:
+            self.logger.error(f"❌ Failed to load {config['filename']}: {str(e)}")
+            return None
     
-    def load_sample_data_if_no_files(self):
+    def load_all_datasets(self) -> Dict[str, pd.DataFrame]:
         """
-        Create sample data for testing if no real files are loaded
-        """
-        if len(self.datasets) == 0:
-            self.logger.info("📝 No data files loaded, creating sample data for testing...")
-            
-            # Create sample properties data
-            import numpy as np
-            from datetime import datetime, timedelta
-            
-            np.random.seed(42)
-            n_properties = 1000
-            
-            self.datasets['properties'] = pd.DataFrame({
-                'property_id': range(1, n_properties + 1),
-                'address': [f"{np.random.randint(100, 9999)} {np.random.choice(['Main St', 'Oak Ave', 'Pine Dr'])} #{i}" 
-                           for i in range(1, n_properties + 1)],
-                'property_type': np.random.choice(['Single Family', 'Condo', 'Townhouse'], n_properties),
-                'bedrooms': np.random.choice([1, 2, 3, 4, 5], n_properties),
-                'permit_date': [datetime.now() - timedelta(days=np.random.randint(0, 1095)) 
-                               for _ in range(n_properties)],
-                'owner_type': np.random.choice(['Individual', 'LLC', 'Corporation'], n_properties),
-            })
-            
-            # Create sample complaints data
-            n_complaints = 3000
-            self.datasets['complaints'] = pd.DataFrame({
-                'complaint_id': range(1, n_complaints + 1),
-                'property_id': np.random.choice(range(1, n_properties + 1), n_complaints),
-                'complaint_date': [datetime.now() - timedelta(days=np.random.randint(0, 730)) 
-                                  for _ in range(n_complaints)],
-                'complaint_type': np.random.choice(['Noise', 'Parking', 'Trash', 'Party'], n_complaints),
-                'status': np.random.choice(['Open', 'Closed'], n_complaints, p=[0.2, 0.8]),
-            })
-            
-            self.logger.info("✅ Sample data created for development")
-    
-    def get_all_datasets(self) -> Dict[str, pd.DataFrame]:
-        """
-        Get all loaded datasets
+        Load all configured datasets - now works immediately with your file IDs
         
         Returns:
-            Dictionary of dataset name to DataFrame
+            Dictionary of dataset names to DataFrames
         """
-        if len(self.datasets) == 0:
-            self.get_folder_contents_instruction()
-            self.load_sample_data_if_no_files()
+        print("🔄 Loading all Scottsdale STR datasets...")
+        print("=" * 45)
+        
+        self.datasets = {}
+        
+        for dataset_key, config in self.file_configs.items():
+            # All file IDs are now pre-configured, so we can load directly
+            df = self.load_dataset(dataset_key)
+            self.datasets[dataset_key] = df
+        
+        # Print summary
+        loaded_count = sum(1 for df in self.datasets.values() if df is not None)
+        total_count = len(self.file_configs)
+        
+        print(f"\n📊 LOADING SUMMARY")
+        print(f"✅ Successfully loaded: {loaded_count}/{total_count} datasets")
+        
+        total_rows = 0
+        total_memory = 0
+        
+        for key, df in self.datasets.items():
+            if df is not None:
+                rows = df.shape[0]
+                memory_mb = df.memory_usage(deep=True).sum() / 1024**2
+                total_rows += rows
+                total_memory += memory_mb
+                
+                print(f"   📋 {key}: {rows:,} rows ({memory_mb:.1f} MB)")
+        
+        if total_rows > 0:
+            print(f"\n📈 Total: {total_rows:,} rows, {total_memory:.1f} MB")
         
         return self.datasets
     
-    def print_summary(self):
-        """Print summary of all loaded datasets"""
-        print("\n📊 LOADED DATASETS SUMMARY")
-        print("=" * 40)
+    def get_dataset_by_category(self) -> Dict[str, Dict[str, pd.DataFrame]]:
+        """
+        Get datasets organized by category
         
-        if len(self.datasets) == 0:
-            print("❌ No datasets loaded")
-            return
+        Returns:
+            Nested dictionary with categories and datasets
+        """
+        categories = {
+            'str_properties': {
+                'licensed': self.datasets.get('licensed_strs'),
+                'unlicensed': self.datasets.get('unlicensed_strs'),
+                'pending': self.datasets.get('pending_licences')
+            },
+            'complaints': {
+                'ez_complaints': self.datasets.get('ez_complaints'), 
+                'code_violations': self.datasets.get('code_violations')
+            },
+            'police': {
+                'incidents': self.datasets.get('police_incidents'),
+                'citations': self.datasets.get('police_citations'),
+                'arrests': self.datasets.get('police_arrests')
+            },
+            'geographic': {
+                'parcels': self.datasets.get('parcels')
+            }
+        }
         
-        total_rows = 0
-        for name, df in self.datasets.items():
-            rows, cols = df.shape
-            memory_mb = df.memory_usage(deep=True).sum() / 1024**2
-            missing = df.isnull().sum().sum()
-            
-            print(f"📋 {name.title()}:")
-            print(f"   Rows: {rows:,}")
-            print(f"   Columns: {cols}")
-            print(f"   Memory: {memory_mb:.1f} MB")
-            print(f"   Missing values: {missing:,}")
-            print(f"   Columns: {list(df.columns)}")
-            print()
-            
-            total_rows += rows
+        return categories
+    
+    def create_sample_data(self):
+        """Create sample data for testing when real data isn't available"""
+        print("🔧 Creating sample data for testing...")
         
-        print(f"📊 Total: {len(self.datasets)} datasets, {total_rows:,} total rows")
+        import numpy as np
+        from datetime import datetime, timedelta
+        
+        np.random.seed(42)
+        
+        # Sample STR properties
+        n_properties = 1000
+        self.datasets['unlicensed_strs'] = pd.DataFrame({
+            'property_id': range(1, n_properties + 1),
+            'address': [f"{np.random.randint(1000, 9999)} {np.random.choice(['N Scottsdale Rd', 'E Indian Bend Rd', 'N Miller Rd'])} #{i}" 
+                       for i in range(1, n_properties + 1)],
+            'property_type': np.random.choice(['Single Family', 'Condominium', 'Townhouse'], n_properties),
+            'bedrooms': np.random.choice([2, 3, 4, 5], n_properties),
+        })
+        
+        # Sample complaints
+        n_complaints = 5000
+        self.datasets['ez_complaints'] = pd.DataFrame({
+            'complaint_id': range(1, n_complaints + 1),
+            'address': np.random.choice(self.datasets['unlicensed_strs']['address'].tolist(), n_complaints),
+            'complaint_date': [datetime.now() - timedelta(days=np.random.randint(0, 730)) 
+                              for _ in range(n_complaints)],
+            'complaint_type': np.random.choice(['Noise', 'Parking', 'Trash', 'Overcrowding', 'Party'], n_complaints),
+            'status': np.random.choice(['Open', 'Closed', 'In Progress'], n_complaints, p=[0.1, 0.8, 0.1]),
+        })
+        
+        print("✅ Sample data created for development")
 
 # Quick usage functions
-def quick_load_str_data():
-    """Quick function to load STR data with instructions"""
-    loader = STRDataLoader()
-    datasets = loader.get_all_datasets()
-    loader.print_summary()
-    return datasets
+def quick_setup_scottsdale_data():
+    """Quick setup with instructions"""
+    loader = ScottsdaleSTRDataLoader()
+    loader.print_file_info()
+    return loader
 
-def load_with_file_links(file_links: Dict[str, str]):
-    """Load data with provided Google Drive file links"""
-    loader = STRDataLoader()
-    loader.setup_with_file_urls(file_links)
-    return loader.get_all_datasets()
+def load_with_links(file_links: Dict[str, str]):
+    """Load with provided Google Drive sharing links"""
+    loader = ScottsdaleSTRDataLoader()
+    loader.setup_file_links(file_links)
+    return loader.load_all_datasets()
 
 # Example usage
 if __name__ == "__main__":
     # Set up logging
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
     
-    print("🏠 STR Data Loader")
-    print("=" * 30)
+    print("🏛️ Scottsdale STR Data Loader")
+    print("=" * 35)
     
-    # Load data
-    datasets = quick_load_str_data()
+    # Show file information
+    loader = quick_setup_scottsdale_data()
     
-    # Show what we loaded
-    for name, df in datasets.items():
-        if df is not None:
-            print(f"\n{name.upper()} preview:")
-            print(df.head(2))
+    # Create sample data for testing
+    loader.create_sample_data()
+    datasets = loader.datasets
+    
+    print(f"\n🎯 Ready for STR nuisance analysis!")
+    print(f"📝 Next: Provide individual Google Drive file sharing links")
