@@ -1,138 +1,170 @@
 """
-Scottsdale STR Data Loader
+General STR Data Loader - Multi-City Compatible
 
-Loads all 8 datasets from your Google Drive folder for comprehensive STR nuisance analysis.
+This module can load STR and complaint data from any city's Google Drive folder.
+Currently configured for Scottsdale data, but easily adaptable for other cities.
 """
 
 import pandas as pd
 import requests
 from io import StringIO
 import logging
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 import warnings
+import re
 warnings.filterwarnings('ignore')
 
-class ScottsdaleSTRDataLoader:
-    """Data loader for Scottsdale STR datasets from Google Drive"""
+class STRDataLoader:
+    """General STR data loader - works with any city's Google Drive folder"""
     
-    def __init__(self, folder_id="1FEInC_DsWaQo8XIvydEGL1e0si7wqvFg"):
+    def __init__(self, city_name="Scottsdale", folder_id=None):
         """
-        Initialize with your Google Drive folder ID
+        Initialize data loader for any city
+        
+        Args:
+            city_name: Name of the city (for display purposes)
+            folder_id: Google Drive folder ID (None to use default Scottsdale)
         """
-        self.folder_id = folder_id
+        self.city_name = city_name
+        self.folder_id = folder_id or "1FEInC_DsWaQo8XIvydEGL1e0si7wqvFg"  # Default: Your Scottsdale folder
         self.logger = logging.getLogger(__name__)
         
-        # Your specific file mappings - UPDATE THESE WITH INDIVIDUAL FILE IDs
-        self.file_configs = {
-            # STR Properties
-            'unlicensed_strs': {
-                'filename': 'Unlicensed_Short-term_Rentals_Public.csv',
-                'file_id': None,  # You'll provide individual sharing link
-                'description': 'Unlicensed STR properties',
-                'size': '70 KB'
-            },
-            'pending_licences': {
-                'filename': 'Pending_Short-term_Rental_Licences_Public.csv', 
-                'file_id': None,
-                'description': 'Pending STR licence applications',
-                'size': '18 KB'
-            },
-            
-            # Main Complaints Data
-            'ez_complaints': {
-                'filename': 'ScottsdaleEZ_Complaints_Public.csv',
-                'file_id': None,
-                'description': 'Main complaints system data', 
-                'size': '26.6 MB'
-            },
-            'code_violations': {
-                'filename': 'Planning_and_Development_Code_Violations_Public.csv',
-                'file_id': None,
-                'description': 'Code violations and enforcement',
-                'size': '3 MB'
-            },
-            
-            # Police Data
-            'police_incidents': {
-                'filename': 'Police_Incident_Reports_Public.csv',
-                'file_id': None,
-                'description': 'Police incident reports',
-                'size': '6.3 MB'
-            },
-            'police_citations': {
-                'filename': 'Police_Citations_Public.csv', 
-                'file_id': None,
-                'description': 'Police citations issued',
-                'size': '5.5 MB'
-            },
-            'police_arrests': {
-                'filename': 'Police_Arrests_Public.csv',
-                'file_id': None,
-                'description': 'Police arrest records',
-                'size': '5.4 MB'
-            },
-            
-            # Geographic Data
-            'parcels': {
-                'filename': 'Parcels_Public.csv',
-                'file_id': None,
-                'description': 'Property parcel information',
-                'size': '6.7 MB'
+        # City-specific file configurations
+        self.city_configs = {
+            "Scottsdale": {
+                "file_mappings": {
+                    # STR Properties
+                    'licensed_strs': {
+                        'filename': 'Licensed_Short-term_Rental_Public.csv',
+                        'file_id': '16-lg-5fj-dttKUgwWTbzo0wDH4lCvV-t',
+                        'description': 'Licensed STR properties',
+                        'category': 'properties'
+                    },
+                    'unlicensed_strs': {
+                        'filename': 'Unlicensed_Short-term_Rentals_Public.csv',
+                        'file_id': '12mlo9JtfIUfOz3CxJVCEIgVIEZKGyQ6X',
+                        'description': 'Unlicensed STR properties',
+                        'category': 'properties'
+                    },
+                    'pending_licences': {
+                        'filename': 'Pending_Short-term_Rental_Licences_Public.csv',
+                        'file_id': '1ybALd2DDYsdP6VgeLfnioo1kKSYt_xRR',
+                        'description': 'Pending STR licence applications',
+                        'category': 'properties'
+                    },
+                    
+                    # Complaints
+                    'ez_complaints': {
+                        'filename': 'ScottsdaleEZ_Complaints_Public.csv',
+                        'file_id': '1UDbXLlVdikJGFyVgOxLExYWFqe3ADcSj',
+                        'description': 'Main complaints system',
+                        'category': 'complaints'
+                    },
+                    'code_violations': {
+                        'filename': 'Planning_and_Development_Code_Violations_Public.csv',
+                        'file_id': '1vUJ-HXU1RGb9AOvn0jAaaSkiYq4ICITs',
+                        'description': 'Code violations and enforcement',
+                        'category': 'complaints'
+                    },
+                    
+                    # Police Data
+                    'police_incidents': {
+                        'filename': 'Police_Incident_Reports_Public.csv',
+                        'file_id': '1PF_cAutvvEMiAmEHzH2Qbljz73k75x0R',
+                        'description': 'Police incident reports',
+                        'category': 'police'
+                    },
+                    'police_citations': {
+                        'filename': 'Police_Citations_Public.csv',
+                        'file_id': '1PQW90VjQsbYXxhOlpRXKM2MRyEbmOL0N',
+                        'description': 'Police citations issued',
+                        'category': 'police'
+                    },
+                    'police_arrests': {
+                        'filename': 'Police_Arrests_Public.csv',
+                        'file_id': '118W8cbYAnEgzPwy1I_cVuqoHLpoMz9UG',
+                        'description': 'Police arrest records',
+                        'category': 'police'
+                    },
+                    
+                    # Geographic
+                    'parcels': {
+                        'filename': 'Parcels_Public.csv',
+                        'file_id': '19PPloUcM2FHxxQP17s4091aaLZjp4juB',
+                        'description': 'Property parcel information',
+                        'category': 'geographic'
+                    }
+                }
             }
+            # Other cities can be added here:
+            # "Phoenix": { "file_mappings": {...} },
+            # "Austin": { "file_mappings": {...} },
         }
         
-        # Loaded datasets storage
+        # Get current city's file configuration
+        if city_name in self.city_configs:
+            self.file_configs = self.city_configs[city_name]["file_mappings"]
+        else:
+            self.file_configs = {}
+            self.logger.warning(f"No configuration found for {city_name}")
+        
+        # Storage for loaded datasets
         self.datasets = {}
     
-    def print_file_info(self):
-        """Display information about all available datasets"""
-        print("📁 SCOTTSDALE STR DATASETS")
-        print("=" * 50)
-        print(f"🔗 Google Drive Folder: {self.folder_id}")
-        print()
+    def add_city_config(self, city_name: str, file_mappings: Dict, folder_id: str = None):
+        """
+        Add configuration for a new city
         
-        # Group by category
-        categories = {
-            'STR Properties': ['unlicensed_strs', 'pending_licences'],
-            'Complaints & Violations': ['ez_complaints', 'code_violations'], 
-            'Police Data': ['police_incidents', 'police_citations', 'police_arrests'],
-            'Geographic Data': ['parcels']
-        }
+        Args:
+            city_name: Name of the city
+            file_mappings: Dictionary of file configurations
+            folder_id: Google Drive folder ID for the city
+        """
+        self.city_configs[city_name] = {"file_mappings": file_mappings}
         
-        for category, datasets in categories.items():
-            print(f"📊 {category}:")
-            for dataset_key in datasets:
-                config = self.file_configs[dataset_key]
-                status = "🔗 Ready" if config['file_id'] else "⏳ Need link"
-                print(f"   {status} {config['filename']} ({config['size']})")
-                print(f"      └── {config['description']}")
-            print()
+        if folder_id:
+            # Update folder ID if provided
+            self.folder_id = folder_id
+            
+        print(f"✅ Added configuration for {city_name}")
+        print(f"📁 Folder ID: {self.folder_id}")
+        print(f"📊 Datasets: {len(file_mappings)}")
     
     def setup_file_links(self, file_links: Dict[str, str]):
         """
-        Set up individual Google Drive file sharing links
+        Set up file links manually (for cities without pre-configured file IDs)
         
         Args:
-            file_links: Dictionary mapping dataset keys to Google Drive sharing URLs
+            file_links: Dictionary mapping dataset keys to Google Drive URLs
         """
-        print("🔗 Setting up Google Drive file links...")
-        
         for dataset_key, url in file_links.items():
             if dataset_key not in self.file_configs:
-                print(f"⚠️  Unknown dataset key: {dataset_key}")
+                self.logger.warning(f"Unknown dataset key: {dataset_key}")
                 continue
             
-            # Extract file ID from sharing URL
-            if '/file/d/' in url:
-                file_id = url.split('/file/d/')[1].split('/')[0]
-            elif '?id=' in url:
-                file_id = url.split('?id=')[1].split('&')[0]
-            else:
-                file_id = url  # Assume it's already just the ID
-            
+            # Extract file ID from URL
+            file_id = self.extract_file_id(url)
             self.file_configs[dataset_key]['file_id'] = file_id
-            filename = self.file_configs[dataset_key]['filename']
-            print(f"   ✅ {dataset_key}: {filename}")
+            
+        print(f"🔗 Updated file links for {self.city_name}")
+    
+    def extract_file_id(self, url: str) -> str:
+        """Extract file ID from Google Drive URL"""
+        patterns = [
+            r'/file/d/([a-zA-Z0-9-_]+)/',
+            r'id=([a-zA-Z0-9-_]+)',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, url)
+            if match:
+                return match.group(1)
+        
+        return url.strip()  # Assume it's already just the ID
+    
+    def get_direct_download_url(self, file_id: str) -> str:
+        """Convert Google Drive file ID to direct download URL"""
+        return f"https://drive.google.com/uc?id={file_id}&export=download"
     
     def load_dataset(self, dataset_key: str) -> Optional[pd.DataFrame]:
         """
@@ -149,24 +181,22 @@ class ScottsdaleSTRDataLoader:
             return None
         
         config = self.file_configs[dataset_key]
-        file_id = config['file_id']
+        file_id = config.get('file_id')
         
         if not file_id:
             self.logger.warning(f"No file ID for {dataset_key}")
             return None
         
         try:
-            # Download from Google Drive
-            url = f"https://drive.google.com/uc?id={file_id}&export=download"
+            url = self.get_direct_download_url(file_id)
             
             self.logger.info(f"📥 Loading {config['filename']}...")
             
-            response = requests.get(url, timeout=120)  # Longer timeout for large files
+            response = requests.get(url, timeout=120)
             response.raise_for_status()
             
             # Handle large files with virus scan warning
             if len(response.text) < 1000 and 'virus scan' in response.text.lower():
-                # Try alternative download method
                 url = f"https://drive.google.com/uc?id={file_id}&export=download&confirm=t"
                 response = requests.get(url, timeout=120)
             
@@ -183,44 +213,61 @@ class ScottsdaleSTRDataLoader:
     
     def load_all_datasets(self) -> Dict[str, pd.DataFrame]:
         """
-        Load all configured datasets - now works immediately with your file IDs
+        Load all configured datasets for the current city
         
         Returns:
             Dictionary of dataset names to DataFrames
         """
-        print("🔄 Loading all Scottsdale STR datasets...")
-        print("=" * 45)
+        print(f"🔄 Loading all {self.city_name} STR datasets...")
+        print(f"📁 Google Drive Folder: {self.folder_id}")
+        print("=" * 50)
         
         self.datasets = {}
         
         for dataset_key, config in self.file_configs.items():
-            # All file IDs are now pre-configured, so we can load directly
             df = self.load_dataset(dataset_key)
             self.datasets[dataset_key] = df
         
         # Print summary
+        self._print_loading_summary()
+        
+        return self.datasets
+    
+    def _print_loading_summary(self):
+        """Print summary of loaded datasets"""
         loaded_count = sum(1 for df in self.datasets.values() if df is not None)
         total_count = len(self.file_configs)
         
-        print(f"\n📊 LOADING SUMMARY")
+        print(f"\n📊 {self.city_name.upper()} LOADING SUMMARY")
+        print("=" * 40)
         print(f"✅ Successfully loaded: {loaded_count}/{total_count} datasets")
         
-        total_rows = 0
-        total_memory = 0
-        
-        for key, df in self.datasets.items():
-            if df is not None:
-                rows = df.shape[0]
-                memory_mb = df.memory_usage(deep=True).sum() / 1024**2
-                total_rows += rows
-                total_memory += memory_mb
-                
-                print(f"   📋 {key}: {rows:,} rows ({memory_mb:.1f} MB)")
-        
-        if total_rows > 0:
-            print(f"\n📈 Total: {total_rows:,} rows, {total_memory:.1f} MB")
-        
-        return self.datasets
+        if loaded_count > 0:
+            total_rows = 0
+            total_memory = 0
+            
+            # Group by category
+            categories = {}
+            for key, df in self.datasets.items():
+                if df is not None:
+                    category = self.file_configs[key].get('category', 'other')
+                    if category not in categories:
+                        categories[category] = []
+                    categories[category].append((key, df))
+            
+            # Print by category
+            for category, datasets_list in categories.items():
+                print(f"\n📁 {category.upper()}:")
+                for key, df in datasets_list:
+                    rows = df.shape[0]
+                    memory_mb = df.memory_usage(deep=True).sum() / 1024**2
+                    total_rows += rows
+                    total_memory += memory_mb
+                    
+                    description = self.file_configs[key]['description']
+                    print(f"   ✅ {description}: {rows:,} rows ({memory_mb:.1f} MB)")
+            
+            print(f"\n📈 TOTAL: {total_rows:,} rows, {total_memory:.1f} MB")
     
     def get_dataset_by_category(self) -> Dict[str, Dict[str, pd.DataFrame]]:
         """
@@ -229,31 +276,42 @@ class ScottsdaleSTRDataLoader:
         Returns:
             Nested dictionary with categories and datasets
         """
-        categories = {
-            'str_properties': {
-                'licensed': self.datasets.get('licensed_strs'),
-                'unlicensed': self.datasets.get('unlicensed_strs'),
-                'pending': self.datasets.get('pending_licences')
-            },
-            'complaints': {
-                'ez_complaints': self.datasets.get('ez_complaints'), 
-                'code_violations': self.datasets.get('code_violations')
-            },
-            'police': {
-                'incidents': self.datasets.get('police_incidents'),
-                'citations': self.datasets.get('police_citations'),
-                'arrests': self.datasets.get('police_arrests')
-            },
-            'geographic': {
-                'parcels': self.datasets.get('parcels')
-            }
-        }
+        categories = {}
+        
+        for key, df in self.datasets.items():
+            if key in self.file_configs:
+                category = self.file_configs[key].get('category', 'other')
+                if category not in categories:
+                    categories[category] = {}
+                categories[category][key] = df
         
         return categories
     
-    def create_sample_data(self):
-        """Create sample data for testing when real data isn't available"""
-        print("🔧 Creating sample data for testing...")
+    def print_city_info(self):
+        """Display information about the current city configuration"""
+        print(f"🏛️ {self.city_name.upper()} STR DATA CONFIGURATION")
+        print("=" * 50)
+        print(f"📁 Google Drive Folder: {self.folder_id}")
+        print(f"📊 Available Datasets: {len(self.file_configs)}")
+        
+        # Group by category for display
+        categories = {}
+        for key, config in self.file_configs.items():
+            category = config.get('category', 'other')
+            if category not in categories:
+                categories[category] = []
+            categories[category].append(config)
+        
+        for category, configs in categories.items():
+            print(f"\n📋 {category.upper()}:")
+            for config in configs:
+                status = "🔗 Ready" if config.get('file_id') else "⏳ Need setup"
+                print(f"   {status} {config['filename']}")
+                print(f"      └── {config['description']}")
+    
+    def create_sample_data_for_testing(self):
+        """Create sample data when real data isn't available"""
+        print(f"🔧 Creating sample data for {self.city_name} testing...")
         
         import numpy as np
         from datetime import datetime, timedelta
@@ -262,54 +320,92 @@ class ScottsdaleSTRDataLoader:
         
         # Sample STR properties
         n_properties = 1000
-        self.datasets['unlicensed_strs'] = pd.DataFrame({
+        self.datasets['licensed_strs'] = pd.DataFrame({
             'property_id': range(1, n_properties + 1),
-            'address': [f"{np.random.randint(1000, 9999)} {np.random.choice(['N Scottsdale Rd', 'E Indian Bend Rd', 'N Miller Rd'])} #{i}" 
+            'address': [f"{np.random.randint(1000, 9999)} {np.random.choice(['Main St', 'Oak Ave', 'Elm Dr'])} #{i}" 
                        for i in range(1, n_properties + 1)],
-            'property_type': np.random.choice(['Single Family', 'Condominium', 'Townhouse'], n_properties),
+            'property_type': np.random.choice(['Single Family', 'Condo', 'Townhouse'], n_properties),
             'bedrooms': np.random.choice([2, 3, 4, 5], n_properties),
         })
         
         # Sample complaints
-        n_complaints = 5000
+        n_complaints = 3000
         self.datasets['ez_complaints'] = pd.DataFrame({
             'complaint_id': range(1, n_complaints + 1),
-            'address': np.random.choice(self.datasets['unlicensed_strs']['address'].tolist(), n_complaints),
+            'address': np.random.choice(self.datasets['licensed_strs']['address'].tolist(), n_complaints),
             'complaint_date': [datetime.now() - timedelta(days=np.random.randint(0, 730)) 
                               for _ in range(n_complaints)],
-            'complaint_type': np.random.choice(['Noise', 'Parking', 'Trash', 'Overcrowding', 'Party'], n_complaints),
-            'status': np.random.choice(['Open', 'Closed', 'In Progress'], n_complaints, p=[0.1, 0.8, 0.1]),
+            'complaint_type': np.random.choice(['Noise', 'Parking', 'Trash', 'Party'], n_complaints),
+            'status': np.random.choice(['Open', 'Closed'], n_complaints, p=[0.2, 0.8]),
         })
         
-        print("✅ Sample data created for development")
+        print(f"✅ Sample data created for {self.city_name} development")
 
-# Quick usage functions
-def quick_setup_scottsdale_data():
-    """Quick setup with instructions"""
-    loader = ScottsdaleSTRDataLoader()
-    loader.print_file_info()
+# Quick usage functions for any city
+def load_city_str_data(city_name="Scottsdale", folder_id=None):
+    """
+    Quick function to load STR data for any city
+    
+    Args:
+        city_name: Name of the city
+        folder_id: Google Drive folder ID (optional)
+        
+    Returns:
+        Tuple of (loader, datasets)
+    """
+    loader = STRDataLoader(city_name=city_name, folder_id=folder_id)
+    loader.print_city_info()
+    
+    # Try to load data, fall back to sample if needed
+    try:
+        datasets = loader.load_all_datasets()
+        if not any(df is not None for df in datasets.values()):
+            print("⚠️  No data loaded, creating sample data for testing...")
+            loader.create_sample_data_for_testing()
+            datasets = loader.datasets
+    except Exception as e:
+        print(f"❌ Error loading data: {e}")
+        print("🔧 Creating sample data for testing...")
+        loader.create_sample_data_for_testing()
+        datasets = loader.datasets
+    
+    return loader, datasets
+
+def add_new_city(city_name: str, file_links: Dict[str, str], folder_id: str = None):
+    """
+    Helper function to add a new city configuration
+    
+    Args:
+        city_name: Name of the new city
+        file_links: Dictionary of dataset keys to Google Drive sharing URLs
+        folder_id: Google Drive folder ID
+    """
+    loader = STRDataLoader()
+    
+    # Convert file links to file mappings
+    file_mappings = {}
+    for key, url in file_links.items():
+        file_id = loader.extract_file_id(url)
+        file_mappings[key] = {
+            'filename': f"{key}.csv",  # Generic filename
+            'file_id': file_id,
+            'description': f"{key.replace('_', ' ').title()}",
+            'category': 'general'  # Can be customized
+        }
+    
+    loader.add_city_config(city_name, file_mappings, folder_id)
     return loader
-
-def load_with_links(file_links: Dict[str, str]):
-    """Load with provided Google Drive sharing links"""
-    loader = ScottsdaleSTRDataLoader()
-    loader.setup_file_links(file_links)
-    return loader.load_all_datasets()
 
 # Example usage
 if __name__ == "__main__":
     # Set up logging
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
     
-    print("🏛️ Scottsdale STR Data Loader")
+    print("🏛️ Multi-City STR Data Loader")
     print("=" * 35)
     
-    # Show file information
-    loader = quick_setup_scottsdale_data()
+    # Load Scottsdale data (default)
+    loader, datasets = load_city_str_data("Scottsdale")
     
-    # Create sample data for testing
-    loader.create_sample_data()
-    datasets = loader.datasets
-    
-    print(f"\n🎯 Ready for STR nuisance analysis!")
-    print(f"📝 Next: Provide individual Google Drive file sharing links")
+    print(f"\n🎯 Ready for {loader.city_name} STR nuisance analysis!")
+    print(f"📊 Loaded datasets: {list(datasets.keys())}")
